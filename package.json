@@ -10,16 +10,13 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
-    "@prisma/client": "^7.8.0",
     "@supabase/supabase-js": "^2.106.1",
     "@upstash/redis": "^1.38.0",
-    "dotenv": "^17.4.2",
     "framer-motion": "^12.40.0",
     "lucide-react": "^1.16.0",
     "next": "16.2.6",
     "next-auth": "^4.24.14",
     "pg": "^8.21.0",
-    "prisma": "^7.8.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "stripe": "^22.1.1"
