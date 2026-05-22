@@ -2,9 +2,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import Stripe from 'stripe';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-
 export async function POST() {
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   const session = await getServerSession(authOptions);
 
   if (!session?.user?.id) {
