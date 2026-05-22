@@ -8,6 +8,7 @@ import GuestModal from '@/components/GuestModal';
 import UpgradeModal from '@/components/UpgradeModal';
 import DisclaimerModal from '@/components/DisclaimerModal';
 import WrapUpModal from '@/components/WrapUpModal';
+import SummaryErrorModal from '@/components/SummaryErrorModal';
 import BreathingOrb, { type OrbState } from '@/components/BreathingOrb';
 import {
   clearGuestSession,
@@ -44,6 +45,7 @@ function HomePageContent() {
   const [aiResponseCount, setAiResponseCount] = useState(0);
   const [showWrapUp, setShowWrapUp] = useState(false);
   const [showWrapUpModal, setShowWrapUpModal] = useState(false);
+  const [showSummaryErrorModal, setShowSummaryErrorModal] = useState(false);
 
   // ref so the orb-idle reset timer can be cancelled on the next send
   const orbResetRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -315,7 +317,9 @@ function HomePageContent() {
           sessionId: sid,
         }),
         keepalive: true,
-      }).catch(() => {});
+      })
+        .then((res) => { if (!res.ok) setShowSummaryErrorModal(true); })
+        .catch(() => setShowSummaryErrorModal(true));
     }
     setMessages([]);
     setOrbState('idle');
@@ -394,6 +398,10 @@ function HomePageContent() {
       <WrapUpModal
         isOpen={showWrapUpModal}
         onClose={() => setShowWrapUpModal(false)}
+      />
+      <SummaryErrorModal
+        isOpen={showSummaryErrorModal}
+        onClose={() => setShowSummaryErrorModal(false)}
       />
     </>
   );
