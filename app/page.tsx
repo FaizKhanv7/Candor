@@ -1,65 +1,400 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
+import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
+import { useSession } from 'next-auth/react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import ChatInterface, { type Message } from '@/components/ChatInterface';
+import GuestModal from '@/components/GuestModal';
+import UpgradeModal from '@/components/UpgradeModal';
+import DisclaimerModal from '@/components/DisclaimerModal';
+import WrapUpModal from '@/components/WrapUpModal';
+import BreathingOrb, { type OrbState } from '@/components/BreathingOrb';
+import {
+  clearGuestSession,
+  getGuestSession,
+  setGuestSession,
+  shouldShowModal,
+} from '@/lib/guest';
+
+export default function HomePage() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-[#281f41]">
+        <div className="w-6 h-6 rounded-full border-2 border-[#9882bd] border-t-transparent animate-spin" />
+      </div>
+    }>
+      <HomePageContent />
+    </Suspense>
+  );
+}
+
+function HomePageContent() {
+  const { data: session } = useSession();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const activeView = searchParams.get('view') || 'chat';
+
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [orbState, setOrbState] = useState<OrbState>('idle');
+  const [showModal, setShowModal] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showDisclaimer, setShowDisclaimer] = useState(false);
+  const [sessionId, setSessionId] = useState('');
+  const [aiResponseCount, setAiResponseCount] = useState(0);
+  const [showWrapUp, setShowWrapUp] = useState(false);
+  const [showWrapUpModal, setShowWrapUpModal] = useState(false);
+
+  // ref so the orb-idle reset timer can be cancelled on the next send
+  const orbResetRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // ref to detect a sign-in transition (null → userId)
+  const prevUserIdRef = useRef<string | null>(null);
+  // memory: inactivity timer + once-per-session guard
+  const inactivityRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const summarizedRef = useRef(false);
+  // tracking refs so beforeunload/timer callbacks always read fresh state
+  const messagesRef = useRef(messages);
+  const sessionRef = useRef(session);
+  const sessionIdRef = useRef(sessionId);
+  const isLoadingRef = useRef(isLoading);
+
+  // ── Keep tracking refs current ────────────────────────────────────────────
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { sessionRef.current = session; }, [session]);
+  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+  useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
+
+  // ── Hydrate from localStorage after mount ──────────────────────────────────
+  useEffect(() => {
+    const idKey = 'candor_session_id';
+    let id = localStorage.getItem(idKey);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(idKey, id);
+    }
+    setSessionId(id);
+
+    const guest = getGuestSession();
+    if (guest.messages.length > 0) {
+      setMessages(guest.messages as Message[]);
+    }
+  }, []);
+
+  // ── Event listeners for sidebar integration ────────────────────────────────
+  useEffect(() => {
+    const handleNewChatEvent = () => {
+      summarizeSession();
+      setMessages([]);
+      setOrbState('idle');
+      setAiResponseCount(0);
+      setShowWrapUp(false);
+      const newId = crypto.randomUUID();
+      localStorage.setItem('candor_session_id', newId);
+      setSessionId(newId);
+      summarizedRef.current = false;
+    };
+
+    const triggerGuestModal = () => setShowModal(true);
+    const triggerUpgradeModal = () => setShowUpgradeModal(true);
+
+    window.addEventListener('new-chat', handleNewChatEvent);
+    window.addEventListener('show-guest-modal', triggerGuestModal);
+    window.addEventListener('show-upgrade-modal', triggerUpgradeModal);
+
+    return () => {
+      window.removeEventListener('new-chat', handleNewChatEvent);
+      window.removeEventListener('show-guest-modal', triggerGuestModal);
+      window.removeEventListener('show-upgrade-modal', triggerUpgradeModal);
+    };
+  }, []);
+
+  // ── Migrate guest messages when user signs in ──────────────────────────────
+  useEffect(() => {
+    const currentUserId = session?.user?.id ?? null;
+    const prevUserId = prevUserIdRef.current;
+
+    if (currentUserId && !prevUserId) {
+      const guest = getGuestSession();
+      if (guest.messages.length > 0) {
+        setMessages((prev) => {
+          const guestMsgs = guest.messages as Message[];
+          const guestIds = new Set(guestMsgs.map((m) => m.id));
+          const extras = prev.filter((m) => !guestIds.has(m.id));
+          return [...guestMsgs, ...extras];
+        });
+        clearGuestSession();
+      }
+    }
+
+    prevUserIdRef.current = currentUserId;
+  }, [session]);
+
+  // ── Session memory summarization ──────────────────────────────────────────
+  const summarizeSession = useCallback(() => {
+    if (summarizedRef.current) return;
+    if (isLoadingRef.current) return;
+    if (!sessionRef.current?.user?.id) return;
+    const currentSessionId = sessionIdRef.current;
+    if (!currentSessionId) return;
+    const msgs = messagesRef.current;
+    if (msgs.filter((m) => m.role === 'user').length < 2) return;
+
+    summarizedRef.current = true;
+
+    const body = JSON.stringify({
+      messages: msgs.map((m) => ({ role: m.role, content: m.content })),
+      sessionId: currentSessionId,
+    });
+    navigator.sendBeacon(
+      '/api/memory/summarize',
+      new Blob([body], { type: 'application/json' })
+    );
+  }, []); // empty deps — reads only from refs
+
+  // Fire summarize when the tab is closed
+  useEffect(() => {
+    window.addEventListener('beforeunload', summarizeSession);
+    return () => window.removeEventListener('beforeunload', summarizeSession);
+  }, [summarizeSession]);
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(orbResetRef.current);
+      clearTimeout(inactivityRef.current);
+    };
+  }, []);
+
+  // ── Send message & stream AI response ──────────────────────────────────────
+  const handleSendMessage = useCallback(
+    async (content: string) => {
+      if (!sessionId) return; // not hydrated yet
+      if (showWrapUp) return;  // wait for user to end or continue
+
+      const userMsg: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content,
+      };
+
+      const updatedMessages = [...messages, userMsg];
+      setMessages(updatedMessages);
+
+      // Show disclaimer once per browser session on the very first message
+      const userMsgsBefore = messages.filter((m) => m.role === 'user').length;
+      if (userMsgsBefore === 0 && !sessionStorage.getItem('candor_disclaimer_shown')) {
+        setShowDisclaimer(true);
+      }
+
+      // Guest-only: persist + check modal threshold
+      if (!session) {
+        setGuestSession({ messages: updatedMessages });
+        const sentCount = updatedMessages.filter((m) => m.role === 'user').length;
+        if (shouldShowModal(sentCount)) setShowModal(true);
+      }
+
+      // Kick off orb thinking state, cancelling any pending idle reset / inactivity timer
+      clearTimeout(orbResetRef.current);
+      clearTimeout(inactivityRef.current);
+      setIsLoading(true);
+      setOrbState('thinking');
+
+      // Placeholder message for streaming-in AI content
+      const aiId = crypto.randomUUID();
+      setMessages((prev) => [...prev, { id: aiId, role: 'assistant', content: '' }]);
+
+      // 5th, 10th, 15th... AI response becomes a wrap-up
+      const isNextWrapUp = (aiResponseCount + 1) % 5 === 0;
+
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: updatedMessages.map((m) => ({ role: m.role, content: m.content })),
+            sessionId,
+            isWrapUp: isNextWrapUp,
+          }),
+        });
+
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({})) as { error?: string; code?: string };
+          if (res.status === 429 && errBody.code === 'RATE_LIMIT_EXCEEDED') {
+            setMessages((prev) => prev.filter((m) => m.id !== aiId));
+            // Guests must sign in; authenticated free users should upgrade
+            if (!session) {
+              setShowModal(true);
+            } else {
+              setShowUpgradeModal(true);
+            }
+            return;
+          }
+          const errorText = errBody.error ?? 'Something went wrong. Please try again.';
+          setMessages((prev) =>
+            prev.map((m) => (m.id === aiId ? { ...m, content: errorText } : m))
+          );
+          return;
+        }
+
+        // Read the plain-text stream chunk by chunk
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let accumulated = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          accumulated += decoder.decode(value, { stream: true });
+          const snapshot = accumulated;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === aiId ? { ...m, content: snapshot } : m))
+          );
+        }
+
+        // Brief bloom animation on the orb, then fade back to idle
+        setOrbState('responding');
+        orbResetRef.current = setTimeout(() => setOrbState('idle'), 1100);
+
+        // Track AI response count; show wrap-up card every 10 responses
+        const nextCount = aiResponseCount + 1;
+        setAiResponseCount(nextCount);
+        if (nextCount % 5 === 0) {
+          setShowWrapUp(true);
+        }
+
+        // Start 30-min inactivity window — fires summarizeSession if idle
+        inactivityRef.current = setTimeout(summarizeSession, 30 * 60 * 1000);
+
+        // Persist final state for guests (includes the full AI reply)
+        if (!session) {
+          setMessages((prev) => {
+            setGuestSession({ messages: prev });
+            return prev;
+          });
+        }
+      } catch {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === aiId
+              ? { ...m, content: "I couldn't connect right now. Please try again." }
+              : m
+          )
+        );
+      } finally {
+        setIsLoading(false);
+        // Only snap back to idle if we never made it to the responding bloom
+        setOrbState((prev) => (prev === 'thinking' ? 'idle' : prev));
+      }
+    },
+    [messages, session, sessionId, summarizeSession, aiResponseCount, showWrapUp]
+  );
+
+  const sentCount = messages.filter((m) => m.role === 'user').length;
+
+  const handleAcknowledgeDisclaimer = () => {
+    sessionStorage.setItem('candor_disclaimer_shown', '1');
+    setShowDisclaimer(false);
+  };
+
+  const handleEndConversation = useCallback(() => {
+    const msgs = messagesRef.current;
+    const sid = sessionIdRef.current;
+    if (
+      !summarizedRef.current &&
+      !isLoadingRef.current &&
+      sessionRef.current?.user?.id &&
+      sid &&
+      msgs.filter((m) => m.role === 'user').length >= 2
+    ) {
+      summarizedRef.current = true;
+      fetch('/api/memory/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: msgs.map((m) => ({ role: m.role, content: m.content })),
+          sessionId: sid,
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+    setMessages([]);
+    setOrbState('idle');
+    setAiResponseCount(0);
+    setShowWrapUp(false);
+    summarizedRef.current = false;
+    const newId = crypto.randomUUID();
+    localStorage.setItem('candor_session_id', newId);
+    setSessionId(newId);
+    setShowWrapUpModal(true);
+  }, []);
+
+  const handleContinueConversation = useCallback(() => {
+    setShowWrapUp(false);
+  }, []);
+
+  if (activeView === 'breathing') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#281f41] text-white select-none">
+        <div className="max-w-md w-full text-center space-y-8 flex flex-col items-center justify-center">
+          <div className="space-y-3">
+            <h1 className="font-serif text-4xl sm:text-5xl font-medium tracking-wide">
+              Breathing Space
+            </h1>
+            <p className="text-sm sm:text-base text-[#dcd6eb] max-w-sm mx-auto leading-relaxed">
+              Take a moment to align your body and mind. Follow the expansion and contraction of the orb using the 4-7-8 method.
+            </p>
+          </div>
+
+          <div className="py-12 relative flex items-center justify-center">
+            <BreathingOrb state="breathing" />
+          </div>
+
+          <div className="space-y-1 bg-white/5 border border-white/5 px-6 py-4 rounded-2xl text-xs sm:text-sm text-[#9b93b0] max-w-xs mx-auto">
+            <p className="font-semibold text-white mb-1.5 uppercase tracking-widest text-[11px]">4-7-8 Method</p>
+            <p>• Inhale deeply for 4 seconds</p>
+            <p>• Hold your breath for 7 seconds</p>
+            <p>• Exhale fully for 8 seconds</p>
+          </div>
+
+          <button
+            onClick={() => router.push('/')}
+            className="px-6 py-3.5 rounded-xl text-sm font-semibold border border-white/10 hover:border-[#9882bd]/30 bg-white/5 hover:bg-white/10 text-white transition-all cursor-pointer"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            Return to Chat
+          </button>
         </div>
-      </main>
-    </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <ChatInterface
+        messages={messages}
+        onSendMessage={handleSendMessage}
+        orbState={orbState}
+        isLoading={isLoading}
+        showWrapUp={showWrapUp}
+        onEndConversation={handleEndConversation}
+        onContinueConversation={handleContinueConversation}
+      />
+      <DisclaimerModal
+        isOpen={showDisclaimer}
+        onAcknowledge={handleAcknowledgeDisclaimer}
+      />
+      <GuestModal
+        isOpen={showModal && !session}
+        sentCount={sentCount}
+        onDismiss={() => setShowModal(false)}
+      />
+      <UpgradeModal
+        isOpen={showUpgradeModal}
+        onDismiss={() => setShowUpgradeModal(false)}
+      />
+      <WrapUpModal
+        isOpen={showWrapUpModal}
+        onClose={() => setShowWrapUpModal(false)}
+      />
+    </>
   );
 }
