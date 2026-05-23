@@ -334,42 +334,38 @@ function HomePageContent() {
     setShowWrapUp(false);
   }, []);
 
-  if (activeView === 'garden') {
-    return <QuietGarden />;
-  }
-
-  if (activeView === 'breathing') {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#281f41] text-white select-none">
-        <div className="max-w-md w-full text-center space-y-8 flex flex-col items-center justify-center">
-          <div className="space-y-3">
-            <h1 className="font-serif text-4xl sm:text-5xl font-medium tracking-wide">
-              Breathing Space
-            </h1>
-            <p className="text-sm sm:text-base text-[#dcd6eb] max-w-sm mx-auto leading-relaxed">
-              Take a moment to align your body and mind. Follow the expansion and contraction of the orb using the 4-7-8 method.
-            </p>
-          </div>
-
-          <div className="py-12 relative flex items-center justify-center">
-            <BreathingOrb state="breathing" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
-      <ChatInterface
-        messages={messages}
-        onSendMessage={handleSendMessage}
-        orbState={orbState}
-        isLoading={isLoading}
-        showWrapUp={showWrapUp}
-        onEndConversation={handleEndConversation}
-        onContinueConversation={handleContinueConversation}
-      />
+      {activeView === 'garden' ? (
+        <QuietGarden />
+      ) : activeView === 'breathing' ? (
+        <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#281f41] text-white select-none">
+          <div className="max-w-md w-full text-center space-y-8 flex flex-col items-center justify-center">
+            <div className="space-y-3">
+              <h1 className="font-serif text-4xl sm:text-5xl font-medium tracking-wide">
+                Breathing Space
+              </h1>
+              <p className="text-sm sm:text-base text-[#dcd6eb] max-w-sm mx-auto leading-relaxed">
+                Take a moment to align your body and mind. Follow the expansion and contraction of the orb using the 4-7-8 method.
+              </p>
+            </div>
+
+            <div className="py-12 relative flex items-center justify-center">
+              <BreathingOrb state="breathing" />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <ChatInterface
+          messages={messages}
+          onSendMessage={handleSendMessage}
+          orbState={orbState}
+          isLoading={isLoading}
+          showWrapUp={showWrapUp}
+          onEndConversation={handleEndConversation}
+          onContinueConversation={handleContinueConversation}
+        />
+      )}
       <DisclaimerModal
         isOpen={showDisclaimer}
         onAcknowledge={handleAcknowledgeDisclaimer}

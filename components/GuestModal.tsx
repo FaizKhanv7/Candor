@@ -63,7 +63,7 @@ export default function GuestModal({ isOpen }: GuestModalProps) {
                 className="text-[15px] leading-[1.75] mb-8"
                 style={{ color: 'var(--text-secondary)' }}
               >
-                Create a free account to keep chatting and save your conversations.
+                Create a free account to keep chatting and save your memories.
               </p>
 
               <button
