@@ -15,7 +15,7 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       // `user` is only present on the very first sign-in for this session.
-      // Upsert the user row and pull back id + isPro so they live in the JWT.
+      // Upsert the user row and pull back the id so it lives in the JWT.
       if (user) {
         const supabase = createSupabaseAdmin();
         const { data } = await supabase
@@ -28,12 +28,11 @@ export const authOptions: NextAuthOptions = {
             },
             { onConflict: 'email' }
           )
-          .select('id, is_pro')
+          .select('id')
           .single();
 
         if (data) {
           token.userId = data.id as string;
-          token.isPro = data.is_pro as boolean;
         }
       }
       return token;
@@ -42,7 +41,6 @@ export const authOptions: NextAuthOptions = {
     session({ session, token }) {
       if (session.user) {
         session.user.id = (token.userId as string) ?? '';
-        session.user.isPro = (token.isPro as boolean) ?? false;
       }
       return session;
     },

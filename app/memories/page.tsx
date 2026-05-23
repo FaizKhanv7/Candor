@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Download, Trash2, X, BookOpen } from 'lucide-react';
+import { ArrowLeft, Download, Trash2, X, Brain } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 interface Memory {
@@ -74,7 +74,7 @@ export default function MemoriesPage() {
 
   useEffect(() => {
     if (status === 'loading') return;
-    if (status === 'unauthenticated' || !session?.user?.isPro) {
+    if (status === 'unauthenticated') {
       router.replace('/');
       return;
     }
@@ -153,7 +153,7 @@ export default function MemoriesPage() {
               className="w-16 h-16 rounded-full flex items-center justify-center mb-5"
               style={{ background: 'rgba(152,130,189,0.1)', border: '1px solid rgba(152,130,189,0.15)' }}
             >
-              <BookOpen size={22} style={{ color: 'var(--accent-purple)' }} />
+              <Brain size={22} style={{ color: 'var(--accent-purple)' }} />
             </div>
             <p className="text-[16px] font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
               No sessions saved yet.
@@ -273,7 +273,7 @@ export default function MemoriesPage() {
                               className="flex items-center gap-1.5 text-[12px] font-medium transition-colors hover:opacity-80"
                               style={{ color: colors.tagText }}
                             >
-                              <BookOpen size={12} />
+                              <Brain size={12} />
                               Revisit
                             </button>
                           </motion.div>

@@ -5,7 +5,7 @@ import { useSession, signIn, signOut } from 'next-auth/react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageSquare, Heart, LogOut, Menu, X, Plus, BookOpen, Crown, ChevronUp, ChevronLeft, ChevronRight, Settings } from 'lucide-react';
+import { MessageSquare, LogOut, Menu, X, Plus, ChevronUp, ChevronLeft, ChevronRight, Settings, Flower2, Brain, Sprout } from 'lucide-react';
 import SettingsModal from './SettingsModal';
 
 interface SidebarLayoutWrapperProps {
@@ -27,24 +27,29 @@ function SidebarNavigation({
 
   const menuItems = [
     {
-      name: 'Chat Space',
+      name: 'Chat',
       icon: MessageSquare,
       href: '/',
-      active: pathname === '/' && currentView !== 'breathing',
+      active: pathname === '/' && currentView === 'chat',
     },
     {
       name: 'Breathing Space',
-      icon: Heart,
+      icon: Flower2,
       href: '/?view=breathing',
       active: pathname === '/' && currentView === 'breathing',
     },
     {
+      name: 'Quiet Garden',
+      icon: Sprout,
+      href: '/?view=garden',
+      active: pathname === '/' && currentView === 'garden',
+    },
+    {
       name: 'Memories',
-      icon: BookOpen,
+      icon: Brain,
       href: '/memories',
       active: pathname === '/memories',
       onClick: handleJournalClick,
-      isPro: true,
     },
   ];
 
@@ -81,11 +86,6 @@ function SidebarNavigation({
               <Icon size={18} className={item.active ? 'text-[#9882bd]' : 'text-[#9b93b0]'} />
               {!isCollapsed && item.name}
             </div>
-            {!isCollapsed && item.isPro && !session?.user?.isPro && (
-              <div className="p-0.5 rounded-md bg-white/5 text-[#9b93b0]">
-                <Crown size={12} className="text-[#9882bd]" />
-              </div>
-            )}
           </Link>
         );
       })}
@@ -150,9 +150,6 @@ export default function SidebarLayoutWrapper({ children }: SidebarLayoutWrapperP
     if (!session) {
       e.preventDefault();
       window.dispatchEvent(new Event('show-guest-modal'));
-    } else if (!session.user?.isPro) {
-      e.preventDefault();
-      window.dispatchEvent(new Event('show-upgrade-modal'));
     }
   };
 
@@ -247,15 +244,6 @@ export default function SidebarLayoutWrapper({ children }: SidebarLayoutWrapperP
                     <p className="text-[14px] font-semibold text-white truncate leading-tight">
                       {session.user?.name}
                     </p>
-                    <p className="text-[11px] text-[#9b93b0] font-medium leading-none mt-0.5 flex items-center gap-1">
-                      {session.user?.isPro ? (
-                        <span className="text-[#9882bd] font-semibold flex items-center gap-0.5">
-                          Pro Member
-                        </span>
-                      ) : (
-                        'Free Account'
-                      )}
-                    </p>
                   </div>
                 )}
               </div>
@@ -283,18 +271,6 @@ export default function SidebarLayoutWrapper({ children }: SidebarLayoutWrapperP
                   <div className="px-3 py-2 border-b border-white/5 mb-1.5">
                     <p className="text-xs text-[#9b93b0] font-medium truncate">{session.user?.email}</p>
                   </div>
-                  {!session.user?.isPro && (
-                    <button
-                      onClick={() => {
-                        setShowProfileMenu(false);
-                        window.dispatchEvent(new Event('show-upgrade-modal'));
-                      }}
-                      className="w-full text-left px-3 py-2.5 text-[14px] font-semibold hover:bg-white/5 rounded-xl flex items-center gap-2 text-[#9882bd] transition-all"
-                    >
-                      <Crown size={14} />
-                      Upgrade to Pro
-                    </button>
-                  )}
                   <button
                     onClick={() => {
                       setShowProfileMenu(false);

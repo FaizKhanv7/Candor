@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, Mic, MicOff } from 'lucide-react';
 import BreathingOrb, { type OrbState } from './BreathingOrb';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -133,15 +133,64 @@ export default function ChatInterface({
   const [input, setInput] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [isScrolledUp, setIsScrolledUp] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [hasSpeechSupport, setHasSpeechSupport] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null);
 
   // Null on the server, set after first client paint to avoid hydration mismatch
   const [welcomeText, setWelcomeText] = useState<string | null>(null);
   useEffect(() => {
     setWelcomeText(WELCOME_PROMPTS[Math.floor(Math.random() * WELCOME_PROMPTS.length)]);
+    setHasSpeechSupport(
+      typeof window !== 'undefined' &&
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ('SpeechRecognition' in window || 'webkitSpeechRecognition' in (window as any))
+    );
+    return () => { recognitionRef.current?.stop(); };
   }, []);
+
+  const handleMicClick = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionAPI) return;
+
+    const recognition = new SpeechRecognitionAPI();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    const baseText = input.trimEnd();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onresult = (event: any) => {
+      let allFinal = '';
+      let interim = '';
+      for (let i = 0; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          allFinal += event.results[i][0].transcript;
+        } else {
+          interim += event.results[i][0].transcript;
+        }
+      }
+      const sep = baseText ? ' ' : '';
+      setInput(baseText + sep + allFinal + interim);
+    };
+
+    recognition.onend = () => setIsRecording(false);
+    recognition.onerror = () => setIsRecording(false);
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsRecording(true);
+  };
 
   const isEmpty = messages.length === 0;
 
@@ -325,12 +374,29 @@ export default function ChatInterface({
                     onBlur={() => setIsFocused(false)}
                     placeholder="Vent away..."
                     rows={1}
-                    className="scrollbar-hidden w-full bg-transparent px-5 py-4 pr-14 text-[17px] leading-6 resize-none outline-none"
+                    className={`scrollbar-hidden w-full bg-transparent px-5 py-4 text-[17px] leading-6 resize-none outline-none ${hasSpeechSupport ? 'pr-24' : 'pr-14'}`}
                     style={{
                       color: 'var(--text-primary)',
                       caretColor: 'var(--accent-purple)',
                     }}
                   />
+                  {hasSpeechSupport && (
+                    <button
+                      onClick={handleMicClick}
+                      disabled={isLoading}
+                      aria-label={isRecording ? 'Stop recording' : 'Start voice input'}
+                      className="absolute right-14 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-lg transition-all disabled:opacity-30 hover:opacity-80"
+                      style={{
+                        background: isRecording ? 'rgba(239,68,68,0.12)' : 'transparent',
+                      }}
+                    >
+                      {isRecording ? (
+                        <MicOff size={16} strokeWidth={2} className="animate-pulse" style={{ color: '#ef4444' }} />
+                      ) : (
+                        <Mic size={16} strokeWidth={2} style={{ color: 'var(--text-dim)' }} />
+                      )}
+                    </button>
+                  )}
                   <button
                     onClick={handleSend}
                     disabled={!input.trim() || isLoading}

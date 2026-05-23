@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { createSupabaseAdmin } from '@/lib/supabase';
 
-export async function DELETE(_req: NextRequest, ctx: RouteContext<'/api/memory/[id]'>) {
+export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
 
   if (!session?.user?.id) {

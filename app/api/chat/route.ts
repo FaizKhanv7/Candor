@@ -23,7 +23,7 @@ function extractSummaryText(raw: string): string {
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
-const FREE_DAILY_LIMIT = 15;   // signed-in free users
+const FREE_DAILY_LIMIT = 10;   // signed-in users
 const GUEST_DAILY_LIMIT = 2;   // unauthenticated guests
 
 // Returns null if env vars are absent (rate limiting is skipped — useful in dev)
@@ -72,46 +72,43 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'sessionId is required' }, { status: 400 });
   }
 
-  // ── Get server session (authoritative — never trust client-sent isPro) ──────
+  // ── Get server session ───────────────────────────────────────────────────────
   const serverSession = await getServerSession(authOptions);
-  const isPro = serverSession?.user?.isPro ?? false;
 
-  // ── Rate limit (free users only) ────────────────────────────────────────────
-  if (!isPro) {
-    const redis = getRedis();
-    if (redis) {
-      // Authenticated free users: stable user ID so "New Chat" can't bypass the limit.
-      // Guest users: client IP so clearing localStorage can't bypass the limit.
-      let identifier: string;
-      if (serverSession?.user?.id) {
-        identifier = `user:${serverSession.user.id}`;
-      } else {
-        const ip =
-          req.headers.get('x-forwarded-for')?.split(',')[0].trim() ??
-          req.headers.get('x-real-ip') ??
-          'unknown';
-        identifier = `ip:${ip}`;
-      }
+  // ── Rate limit ───────────────────────────────────────────────────────────────
+  const redis = getRedis();
+  if (redis) {
+    // Authenticated users: stable user ID so "New Chat" can't bypass the limit.
+    // Guest users: client IP so clearing localStorage can't bypass the limit.
+    let identifier: string;
+    if (serverSession?.user?.id) {
+      identifier = `user:${serverSession.user.id}`;
+    } else {
+      const ip =
+        req.headers.get('x-forwarded-for')?.split(',')[0].trim() ??
+        req.headers.get('x-real-ip') ??
+        'unknown';
+      identifier = `ip:${ip}`;
+    }
 
-      const key = rateLimitKey(identifier);
-      const count = await redis.incr(key);
-      if (count === 1) {
-        // Set TTL on the first increment so the key expires at midnight-ish
-        await redis.expire(key, 86_400);
-      }
-      const isGuest = !serverSession?.user?.id;
-      const limit = isGuest ? GUEST_DAILY_LIMIT : FREE_DAILY_LIMIT;
-      if (count > limit) {
-        return Response.json(
-          {
-            error: isGuest
-              ? "You've reached the free limit of 2 messages. Sign in to continue."
-              : "You've reached your daily limit of 15 messages. Upgrade to Pro for unlimited access.",
-            code: 'RATE_LIMIT_EXCEEDED',
-          },
-          { status: 429 }
-        );
-      }
+    const key = rateLimitKey(identifier);
+    const count = await redis.incr(key);
+    if (count === 1) {
+      // Set TTL on the first increment so the key expires at midnight-ish
+      await redis.expire(key, 86_400);
+    }
+    const isGuest = !serverSession?.user?.id;
+    const limit = isGuest ? GUEST_DAILY_LIMIT : FREE_DAILY_LIMIT;
+    if (count > limit) {
+      return Response.json(
+        {
+          error: isGuest
+            ? "You've reached the free limit of 2 messages. Sign in to continue."
+            : "You've reached your daily limit of 10 messages. Come back tomorrow.",
+          code: 'RATE_LIMIT_EXCEEDED',
+        },
+        { status: 429 }
+      );
     }
   }
 
@@ -138,7 +135,7 @@ export async function POST(req: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const result = await createCandorResponse(messages, isPro, memoryContext, isWrapUp);
+        const result = await createCandorResponse(messages, memoryContext, isWrapUp);
         for await (const chunk of result.stream) {
           const text = chunk.text();
           if (text) controller.enqueue(encoder.encode(text));

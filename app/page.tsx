@@ -5,11 +5,11 @@ import { useSession } from 'next-auth/react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import ChatInterface, { type Message } from '@/components/ChatInterface';
 import GuestModal from '@/components/GuestModal';
-import UpgradeModal from '@/components/UpgradeModal';
 import DisclaimerModal from '@/components/DisclaimerModal';
 import WrapUpModal from '@/components/WrapUpModal';
 import SummaryErrorModal from '@/components/SummaryErrorModal';
 import BreathingOrb, { type OrbState } from '@/components/BreathingOrb';
+import QuietGarden from '@/components/QuietGarden';
 import {
   clearGuestSession,
   getGuestSession,
@@ -39,7 +39,6 @@ function HomePageContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [orbState, setOrbState] = useState<OrbState>('idle');
   const [showModal, setShowModal] = useState(false);
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   const [sessionId, setSessionId] = useState('');
   const [aiResponseCount, setAiResponseCount] = useState(0);
@@ -97,16 +96,13 @@ function HomePageContent() {
     };
 
     const triggerGuestModal = () => setShowModal(true);
-    const triggerUpgradeModal = () => setShowUpgradeModal(true);
 
     window.addEventListener('new-chat', handleNewChatEvent);
     window.addEventListener('show-guest-modal', triggerGuestModal);
-    window.addEventListener('show-upgrade-modal', triggerUpgradeModal);
 
     return () => {
       window.removeEventListener('new-chat', handleNewChatEvent);
       window.removeEventListener('show-guest-modal', triggerGuestModal);
-      window.removeEventListener('show-upgrade-modal', triggerUpgradeModal);
     };
   }, []);
 
@@ -222,12 +218,14 @@ function HomePageContent() {
         if (!res.ok) {
           const errBody = await res.json().catch(() => ({})) as { error?: string; code?: string };
           if (res.status === 429 && errBody.code === 'RATE_LIMIT_EXCEEDED') {
-            setMessages((prev) => prev.filter((m) => m.id !== aiId));
-            // Guests must sign in; authenticated free users should upgrade
             if (!session) {
+              setMessages((prev) => prev.filter((m) => m.id !== aiId));
               setShowModal(true);
             } else {
-              setShowUpgradeModal(true);
+              const errorText = errBody.error ?? "You've reached your daily message limit. Come back tomorrow.";
+              setMessages((prev) =>
+                prev.map((m) => (m.id === aiId ? { ...m, content: errorText } : m))
+              );
             }
             return;
           }
@@ -336,6 +334,10 @@ function HomePageContent() {
     setShowWrapUp(false);
   }, []);
 
+  if (activeView === 'garden') {
+    return <QuietGarden />;
+  }
+
   if (activeView === 'breathing') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#281f41] text-white select-none">
@@ -352,20 +354,6 @@ function HomePageContent() {
           <div className="py-12 relative flex items-center justify-center">
             <BreathingOrb state="breathing" />
           </div>
-
-          <div className="space-y-1 bg-white/5 border border-white/5 px-6 py-4 rounded-2xl text-xs sm:text-sm text-[#9b93b0] max-w-xs mx-auto">
-            <p className="font-semibold text-white mb-1.5 uppercase tracking-widest text-[11px]">4-7-8 Method</p>
-            <p>• Inhale deeply for 4 seconds</p>
-            <p>• Hold your breath for 7 seconds</p>
-            <p>• Exhale fully for 8 seconds</p>
-          </div>
-
-          <button
-            onClick={() => router.push('/')}
-            className="px-6 py-3.5 rounded-xl text-sm font-semibold border border-white/10 hover:border-[#9882bd]/30 bg-white/5 hover:bg-white/10 text-white transition-all cursor-pointer"
-          >
-            Return to Chat
-          </button>
         </div>
       </div>
     );
@@ -390,10 +378,6 @@ function HomePageContent() {
         isOpen={showModal && !session}
         sentCount={sentCount}
         onDismiss={() => setShowModal(false)}
-      />
-      <UpgradeModal
-        isOpen={showUpgradeModal}
-        onDismiss={() => setShowUpgradeModal(false)}
       />
       <WrapUpModal
         isOpen={showWrapUpModal}
