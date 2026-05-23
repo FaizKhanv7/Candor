@@ -407,16 +407,20 @@ function CanSvg({ active }: { active: boolean }) {
 // ── Pot Slot ───────────────────────────────────────────────────
 
 function PotSlot({
-  pot, potIdx, onDrop, onClickPot,
+  pot, potIdx, onDrop, onClickPot, touchDragOver, touchWaterOver,
 }: {
   pot: Pot;
   potIdx: number;
   onDrop: (e: React.DragEvent) => void;
   onClickPot: (rect: DOMRect) => void;
+  touchDragOver?: boolean;
+  touchWaterOver?: boolean;
 }) {
   const slotRef      = useRef<HTMLDivElement>(null);
   const [dragOver, setDragOver]           = useState(false);
   const [waterDragOver, setWaterDragOver] = useState(false);
+  const effectiveDragOver  = dragOver  || !!(touchDragOver  && !pot.plant);
+  const effectiveWaterOver = waterDragOver || !!(touchWaterOver && !!pot.plant);
 
   const isEmpty    = !pot.plant;
   const isBloom    = pot.stage === 3 && !!pot.plant;
@@ -460,6 +464,7 @@ function PotSlot({
       ref={slotRef}
       className="flex flex-col items-center gap-1"
       style={{ width: 96 }}
+      data-potid={pot.id}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -475,10 +480,10 @@ function PotSlot({
             <PlantIllustration type={pot.plant} stage={pot.stage} />
           </div>
         )}
-        {isEmpty && dragOver && (
+        {isEmpty && effectiveDragOver && (
           <div className="absolute inset-0 flex items-center justify-center" style={{ color: '#9882bd', fontSize: 22 }}>✦</div>
         )}
-        {waterDragOver && (
+        {effectiveWaterOver && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <span style={{ fontSize: 24, filter: 'drop-shadow(0 0 8px rgba(136,196,216,0.8))' }}>💧</span>
           </div>
@@ -489,9 +494,9 @@ function PotSlot({
       <div
         className="relative cursor-pointer"
         style={{
-          outline: waterDragOver
+          outline: effectiveWaterOver
             ? '2px dashed rgba(136,196,216,0.6)'
-            : dragOver
+            : effectiveDragOver
               ? '2px dashed rgba(152,130,189,0.55)'
               : '2px solid transparent',
           borderRadius: 10,
@@ -526,8 +531,8 @@ function PotSlot({
             </p>
           </>
         ) : (
-          <p className="text-[10px]" style={{ color: dragOver ? '#9882bd' : '#4a4560' }}>
-            {dragOver ? 'drop here' : 'empty'}
+          <p className="text-[10px]" style={{ color: effectiveDragOver ? '#9882bd' : '#4a4560' }}>
+            {effectiveDragOver ? 'drop here' : 'empty'}
           </p>
         )}
       </div>
@@ -640,6 +645,15 @@ function ShopModal({
   );
 }
 
+// ── Touch drag helper ─────────────────────────────────────────
+function findPotIdAtPoint(x: number, y: number): number | null {
+  for (const el of document.elementsFromPoint(x, y)) {
+    const p = el.closest('[data-potid]');
+    if (p) return parseInt(p.getAttribute('data-potid')!);
+  }
+  return null;
+}
+
 // ── Main Component ─────────────────────────────────────────────
 
 export default function QuietGarden() {
@@ -669,6 +683,10 @@ export default function QuietGarden() {
   const particleId = useRef(0);
   const toastId    = useRef(0);
   const notified   = useRef<Set<number>>(new Set());
+  const touchDrag  = useRef<{ type: 'seed'; seedType: PlantType } | { type: 'water' } | null>(null);
+  const [ghostPos,       setGhostPos]       = useState<{ x: number; y: number } | null>(null);
+  const [ghostContent,   setGhostContent]   = useState<{ type: 'seed'; seedType: PlantType; color: string } | { type: 'water' } | null>(null);
+  const [touchOverPotId, setTouchOverPotId] = useState<number | null>(null);
 
   const stars = useMemo(() =>
     Array.from({ length: 45 }, (_, i) => ({
@@ -772,45 +790,48 @@ export default function QuietGarden() {
     dragSeed.current = type;
   }, []);
 
+  // ── Shared drop actions (used by both mouse DnD and touch) ────
+  const handleSeedDrop = useCallback((potId: number, seedType: PlantType) => {
+    setPots(prev => prev.map(pot =>
+      pot.id === potId && !pot.plant
+        ? { ...pot, plant: seedType, stage: 0, timer: STAGE_SECS, watered: false }
+        : pot
+    ));
+  }, []);
+
+  const handleWaterPot = useCallback((potId: number, cx: number, cy: number) => {
+    setPots(prev => prev.map(pot => {
+      if (pot.id !== potId || !pot.plant || pot.stage >= 3) return pot;
+      const drops: Particle[] = Array.from({ length: 10 }, () => ({
+        id: ++particleId.current,
+        x: cx + (Math.random() - 0.5) * 28,
+        y: cy - 8,
+        vx: (Math.random() - 0.5) * 2.5,
+        vy: -(Math.random() * 2.8 + 0.8),
+        type: 'drop' as const,
+        life: 1,
+        color: Math.random() > 0.5 ? '#88c8f0' : '#aadcf8',
+        size: Math.random() * 4 + 3,
+      }));
+      setParticles(p => [...p, ...drops]);
+      setPoints(p => p + 5);
+      const newTimer = pot.watered ? Math.max(pot.timer - WATER_BOOST, 1) : pot.timer;
+      return { ...pot, watered: true, timer: newTimer };
+    }));
+  }, []);
+
   // ── Pot drop: handles seed AND water drops ────────────────────
   const onPotDrop = useCallback((potId: number, e: React.DragEvent) => {
     e.preventDefault();
-    const isWater = e.dataTransfer.types.includes('dragwater');
-
-    if (isWater) {
-      const cx = e.clientX;
-      const cy = e.clientY;
-      setPots(prev => prev.map(pot => {
-        if (pot.id !== potId || !pot.plant || pot.stage >= 3) return pot;
-
-        const drops: Particle[] = Array.from({ length: 10 }, () => ({
-          id: ++particleId.current,
-          x: cx + (Math.random() - 0.5) * 28,
-          y: cy - 8,
-          vx: (Math.random() - 0.5) * 2.5,
-          vy: -(Math.random() * 2.8 + 0.8),
-          type: 'drop' as const,
-          life: 1,
-          color: Math.random() > 0.5 ? '#88c8f0' : '#aadcf8',
-          size: Math.random() * 4 + 3,
-        }));
-        setParticles(p => [...p, ...drops]);
-        setPoints(p => p + 5);
-
-        const newTimer = pot.watered ? Math.max(pot.timer - WATER_BOOST, 1) : pot.timer;
-        return { ...pot, watered: true, timer: newTimer };
-      }));
+    if (e.dataTransfer.types.includes('dragwater')) {
+      handleWaterPot(potId, e.clientX, e.clientY);
     } else {
       const seed = dragSeed.current;
       if (!seed) return;
       dragSeed.current = null;
-      setPots(prev => prev.map(pot =>
-        pot.id === potId && !pot.plant
-          ? { ...pot, plant: seed, stage: 0, timer: STAGE_SECS, watered: false }
-          : pot
-      ));
+      handleSeedDrop(potId, seed);
     }
-  }, []);
+  }, [handleWaterPot, handleSeedDrop]);
 
   // ── Click pot: harvest only ───────────────────────────────────
   const onPotClick = useCallback((potId: number, rect: DOMRect) => {
@@ -912,11 +933,32 @@ export default function QuietGarden() {
           draggable
           onDragStart={e => { e.dataTransfer.setData('dragwater', 'true'); }}
           onDragEnd={() => {}}
+          onTouchStart={e => {
+            const t = e.touches[0];
+            touchDrag.current = { type: 'water' };
+            setGhostPos({ x: t.clientX, y: t.clientY });
+            setGhostContent({ type: 'water' });
+          }}
+          onTouchMove={e => {
+            const t = e.touches[0];
+            setGhostPos({ x: t.clientX, y: t.clientY });
+            setTouchOverPotId(findPotIdAtPoint(t.clientX, t.clientY));
+          }}
+          onTouchEnd={e => {
+            const t = e.changedTouches[0];
+            const potId = findPotIdAtPoint(t.clientX, t.clientY);
+            if (potId !== null) handleWaterPot(potId, t.clientX, t.clientY);
+            touchDrag.current = null;
+            setGhostPos(null);
+            setGhostContent(null);
+            setTouchOverPotId(null);
+          }}
           className="flex items-center gap-2 px-4 py-2 rounded-xl select-none cursor-grab active:cursor-grabbing transition-all duration-200"
           style={{
             background: 'rgba(136,196,216,0.1)',
             border: '1px solid rgba(136,196,216,0.28)',
             color: '#88c4d8',
+            touchAction: 'none',
           }}
           title="Drag onto a pot to water it"
         >
@@ -961,6 +1003,8 @@ export default function QuietGarden() {
                 potIdx={pot.id}
                 onDrop={e => onPotDrop(pot.id, e)}
                 onClickPot={rect => onPotClick(pot.id, rect)}
+                touchDragOver={touchOverPotId === pot.id && ghostContent?.type === 'seed'}
+                touchWaterOver={touchOverPotId === pot.id && ghostContent?.type === 'water'}
               />
             ))}
           </div>
@@ -981,7 +1025,28 @@ export default function QuietGarden() {
                 draggable
                 onDragStart={e => onSeedDragStart(seed.type, e)}
                 onDragEnd={() => { dragSeed.current = null; }}
+                onTouchStart={e => {
+                  const t = e.touches[0];
+                  touchDrag.current = { type: 'seed', seedType: seed.type };
+                  setGhostPos({ x: t.clientX, y: t.clientY });
+                  setGhostContent({ type: 'seed', seedType: seed.type, color: seed.color });
+                }}
+                onTouchMove={e => {
+                  const t = e.touches[0];
+                  setGhostPos({ x: t.clientX, y: t.clientY });
+                  setTouchOverPotId(findPotIdAtPoint(t.clientX, t.clientY));
+                }}
+                onTouchEnd={e => {
+                  const t = e.changedTouches[0];
+                  const potId = findPotIdAtPoint(t.clientX, t.clientY);
+                  if (potId !== null) handleSeedDrop(potId, seed.type);
+                  touchDrag.current = null;
+                  setGhostPos(null);
+                  setGhostContent(null);
+                  setTouchOverPotId(null);
+                }}
                 className="flex flex-col items-center gap-1 select-none cursor-grab active:cursor-grabbing group"
+                style={{ touchAction: 'none' }}
               >
                 <div
                   className="w-12 h-12 rounded-full flex items-center justify-center transition-transform duration-200 group-hover:scale-105"
@@ -1018,7 +1083,7 @@ export default function QuietGarden() {
 
         <div className="flex items-center justify-center gap-6 mt-4 flex-wrap">
           <p className="text-xs" style={{ color: '#3d3655' }}>
-            Drag a seed into an empty pot · Drag 💧 to water
+            Drag or touch a seed into an empty pot · Drag or touch 💧 to water
           </p>
           <p className="text-xs" style={{ color: '#3d3655' }}>
             Water (+5 pts) · Harvest bloom (+50 pts)
@@ -1035,6 +1100,29 @@ export default function QuietGarden() {
           onBuy={buyFromShop}
           onClose={() => setShowShop(false)}
         />
+      )}
+
+      {/* Touch drag ghost */}
+      {ghostPos && ghostContent && (
+        <div
+          className="fixed z-[100] pointer-events-none"
+          style={{ left: ghostPos.x - 24, top: ghostPos.y - 24, opacity: 0.88, transform: 'scale(1.15)' }}
+        >
+          {ghostContent.type === 'water' ? (
+            <CanSvg active />
+          ) : (
+            <div
+              className="w-12 h-12 rounded-full flex items-center justify-center"
+              style={{
+                background: `radial-gradient(circle at 35% 35%, ${ghostContent.color}88, ${ghostContent.color}33)`,
+                border: `1px solid ${ghostContent.color}55`,
+                boxShadow: `0 2px 12px ${ghostContent.color}44`,
+              }}
+            >
+              <SeedSvg color={ghostContent.color} />
+            </div>
+          )}
+        </div>
       )}
 
       {/* Particles */}
